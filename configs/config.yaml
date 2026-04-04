@@ -1,7 +1,7 @@
 # Wanjiku TTS Configuration
 
 stream:
-  url: ""  # Set your Kikuyu radio stream URL here
+  url: "https://mediamax.api.radiosphere.io/channels/kameme/stream.aac"  # Kameme FM live stream
   format: mp3
   sample_rate: 24000
 

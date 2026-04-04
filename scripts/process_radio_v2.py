@@ -145,7 +145,7 @@ def run_clean(input_dir, work_dir, clips_dir):
             sf.write(clips_dir / name, clip, sr)
             manifest.append({
                 "audio": name, "speaker": f"speaker_{seg['speaker']}",
-                "duration": round(len(clip) / sr, 2), "snr": round(snr, 1),
+                "duration": round(float(len(clip) / sr), 2), "snr": round(float(snr), 1),
                 "source": fname, "text": "",
             })
             idx += 1
