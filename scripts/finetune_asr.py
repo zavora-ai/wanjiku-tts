@@ -58,11 +58,12 @@ def main():
 
     # Freeze feature extractor, only train adapter + LM head
     model.freeze_feature_encoder()
-    for param in model.wav2vec2.parameters():
-        param.requires_grad = False
-    for param in model.wav2vec2.adapter.parameters():
-        param.requires_grad = True
+    model.freeze_base_model()
     model.lm_head.requires_grad_(True)
+    # Unfreeze adapter layers
+    for name, param in model.named_parameters():
+        if "adapter" in name:
+            param.requires_grad = True
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in model.parameters())
