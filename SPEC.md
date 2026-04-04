@@ -2,12 +2,12 @@
 
 ## 1. Overview
 
-Build a production-quality Kikuyu Text-to-Speech system fine-tuned on Kameme FM broadcast voices. The system will generate natural Kikuyu speech that captures the distinctive tone, cadence, and code-switching patterns of Kameme FM presenters.
+Build a production-quality Kikuyu Text-to-Speech system fine-tuned on Kikuyu broadcast voices. The system will generate natural Kikuyu speech that captures the distinctive tone, cadence, and code-switching patterns of radio presenters.
 
 ### 1.1 Goals
 
 - Generate intelligible, natural-sounding Kikuyu speech
-- Support voice cloning of specific Kameme FM presenters (3-second reference)
+- Support voice cloning of specific radio presenters (3-second reference)
 - Handle Kikuyu–Swahili–English code-switching common in Kenyan broadcasting
 - Produce broadcast-quality audio (24kHz+, mono, normalized)
 - Provide a simple API/CLI for text-to-speech inference
@@ -50,8 +50,8 @@ Build a production-quality Kikuyu Text-to-Speech system fine-tuned on Kameme FM 
 
 | Feature | Benefit for this project |
 |---|---|
-| 3-sec voice cloning | Clone specific Kameme presenters with minimal audio |
-| Apache 2.0 license | Commercial use for Kameme |
+| 3-sec voice cloning | Clone specific radio presenters with minimal audio |
+| Apache 2.0 license | Commercial deployment |
 | Voice design mode | Create new Kikuyu voices from text descriptions |
 | Streaming support | Future real-time deployment |
 | 1.7B parameters | Trainable on a single A100/H100 GPU |
@@ -70,12 +70,12 @@ Build a production-quality Kikuyu Text-to-Speech system fine-tuned on Kameme FM 
 
 **Download script**: `scripts/download_waxal.py`
 
-### 3.2 Secondary Dataset: Kameme FM Recordings
+### 3.2 Secondary Dataset: Radio Broadcast Recordings
 
-- **Source**: Live stream at `https://radio.or.ke/kameme/` + archived segments
+- **Source**: Live stream at `` + archived segments
 - **Target volume**: 50–100 hours of clean, transcribed presenter speech
 - **Collection method**: Stream recording → speech separation → segmentation → transcription
-- **Purpose**: Fine-tune for Kameme broadcast voice style
+- **Purpose**: Fine-tune for broadcast voice style
 
 **Collection pipeline**:
 1. `scripts/record_stream.py` — Capture raw audio from the live stream
@@ -100,7 +100,7 @@ Build a production-quality Kikuyu Text-to-Speech system fine-tuned on Kameme FM 
 Each training sample:
 ```
 data/
-├── kameme_clean/
+├── radio_clean/
 │   ├── KAM_0001.wav          # 24kHz mono WAV, 5-15s
 │   ├── KAM_0002.wav
 │   └── ...
@@ -114,7 +114,7 @@ The `scripts/normalize_text.py` handles:
 
 1. **Number expansion**: `1000` → `ngiri ĩmwe` (one thousand)
 2. **Abbreviation expansion**: `KBC` → `Kei Bii Cii`
-3. **Loanword handling**: Keep English/Swahili loanwords as-is (common in Kameme broadcasts)
+3. **Loanword handling**: Keep English/Swahili loanwords as-is (common in broadcasts)
 4. **Tone diacritics**: Preserve Kikuyu tone marks (ĩ, ũ) — critical for correct pronunciation
 5. **Punctuation normalization**: Standardize quotes, dashes, ellipses
 6. **Currency**: `Ksh 500` → `ciringĩ magana matano`
@@ -143,11 +143,11 @@ fp16: true
 **Hardware**: 1x NVIDIA A100 80GB (or equivalent)
 **Estimated time**: ~24–48 hours
 
-### 4.2 Phase 2: Voice Style Adaptation (Kameme)
+### 4.2 Phase 2: Voice Style Adaptation (radio station)
 
-Fine-tune the Phase 1 checkpoint on Kameme FM data to learn:
+Fine-tune the Phase 1 checkpoint on broadcast data to learn:
 - Broadcast speech patterns (pacing, emphasis)
-- Kameme-specific code-switching patterns
+- broadcast-specific code-switching patterns
 - Individual presenter voice characteristics
 
 **Hyperparameters**:
@@ -161,7 +161,7 @@ max_steps: 10000
 
 ### 4.3 Phase 3: Voice Cloning Setup
 
-Extract x-vector speaker embeddings from target Kameme presenters:
+Extract x-vector speaker embeddings from target radio presenters:
 - Requires 3+ seconds of clean reference audio per presenter
 - Store embeddings for inference-time voice selection
 
@@ -213,7 +213,7 @@ python -m wanjiku_tts --text "Ũhoro wa mũthenya" --voice-desc "warm male Kikuy
 ```python
 from wanjiku_tts import WanjikuTTS
 
-tts = WanjikuTTS(model_path="models/checkpoints/kameme-v1")
+tts = WanjikuTTS(model_path="models/checkpoints/wanjiku-v1")
 tts.synthesize("Ũhoro wa mũthenya", output="speech.wav")
 tts.synthesize("Ũhoro wa mũthenya", reference_audio="presenter.wav", output="speech.wav")
 ```
@@ -248,12 +248,12 @@ wanjiku-tts/
 │   └── config.yaml            # Training and inference configuration
 ├── data/
 │   ├── waxal_kikuyu/          # Google WAXAL Kikuyu subset
-│   ├── kameme_raw/            # Raw radio recordings
-│   ├── kameme_clean/          # Processed utterance clips
+│   ├── radio_raw/            # Raw radio recordings
+│   ├── radio_clean/          # Processed utterance clips
 │   └── transcripts/           # JSONL manifests
 ├── scripts/
 │   ├── download_waxal.py      # Download and extract WAXAL dataset
-│   ├── record_stream.py       # Capture Kameme FM live stream
+│   ├── record_stream.py       # Capture Kikuyu radio live stream
 │   ├── clean_audio.py         # Audio cleaning pipeline
 │   ├── normalize_text.py      # Kikuyu text normalization
 │   └── finetune.py            # Fine-tuning script
@@ -287,10 +287,10 @@ wanjiku-tts/
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Kikuyu tone errors after fine-tuning | Unintelligible speech | Encode tone diacritics in training text; evaluate with native speakers early |
-| Insufficient Kameme data quality | Poor voice style transfer | Aggressive audio cleaning; prioritize quality over quantity |
+| Insufficient broadcast data quality | Poor voice style transfer | Aggressive audio cleaning; prioritize quality over quantity |
 | Qwen3-TTS architecture not adaptable to Kikuyu | Project failure | Fallback: use VITS or Meta MMS as alternative base model |
 | Code-switching breaks synthesis | Garbled mixed-language output | Train on code-switched examples explicitly; use language tags in input |
-| Kameme FM licensing issues | Cannot use recordings | Get written permission from Kameme; they commissioned this project so should be fine |
+| radio station licensing issues | Cannot use recordings | Get written permission from radio station; they commissioned this project so should be fine |
 | GPU compute costs | Budget overrun | Start with 0.6B model for prototyping; use A100 spot instances |
 
 ---
@@ -299,10 +299,10 @@ wanjiku-tts/
 
 | Week | Milestone |
 |---|---|
-| 1–2 | Data pipeline: download WAXAL, set up stream recording, begin Kameme capture |
-| 3–4 | Audio cleaning and transcription of Kameme segments |
+| 1–2 | Data pipeline: download WAXAL, set up stream recording, begin broadcast capture |
+| 3–4 | Audio cleaning and transcription of broadcast segments |
 | 5–6 | Phase 1 fine-tuning on WAXAL Kikuyu |
-| 7–8 | Phase 2 fine-tuning on Kameme data |
+| 7–8 | Phase 2 fine-tuning on broadcast data |
 | 9 | Evaluation with native speaker panel |
 | 10 | Bug fixes, optimization, delivery |
 
@@ -311,7 +311,7 @@ wanjiku-tts/
 ## 12. Success Criteria
 
 1. MOS score ≥ 3.5 from native Kikuyu speaker panel
-2. Successful voice cloning of at least 2 Kameme presenters
+2. Successful voice cloning of at least 2 radio presenters
 3. Handles code-switched Kikuyu/English/Swahili sentences without breaking
 4. Generates broadcast-quality audio (24kHz, clean, normalized)
 5. End-to-end latency < 10 seconds for a 30-word sentence (batch mode)

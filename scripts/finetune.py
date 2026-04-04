@@ -17,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description="Fine-tune Qwen3-TTS for Kikuyu")
     parser.add_argument("--config", default="configs/config.yaml")
     parser.add_argument("--phase", type=int, choices=[1, 2], default=1,
-                        help="1=WAXAL adaptation, 2=Kameme voice style")
+                        help="1=WAXAL adaptation, 2=broadcast voice style")
     parser.add_argument("--resume", default=None, help="Resume from checkpoint path")
     args = parser.parse_args()
 
@@ -32,7 +32,7 @@ def main():
     if args.phase == 1:
         data_path = Path(cfg["data"]["waxal_dir"]) / "train"
     else:
-        data_path = Path(cfg["data"]["kameme_clean_dir"])
+        data_path = Path(cfg["data"]["radio_clean_dir"])
 
     if not data_path.exists():
         print(f"ERROR: Dataset not found at {data_path}")

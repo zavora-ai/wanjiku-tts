@@ -1,6 +1,6 @@
 # Wanjiku Kikuyu TTS
 
-Kikuyu Text-to-Speech system fine-tuned on Kameme FM broadcast voices, built on Qwen3-TTS.
+Kikuyu Text-to-Speech system fine-tuned on Kikuyu broadcast voices, built on Qwen3-TTS.
 
 ## Quick Start
 
@@ -13,11 +13,11 @@ pip install -r requirements.txt
 # Download WAXAL Kikuyu dataset
 python scripts/download_waxal.py
 
-# Record Kameme FM stream (records for 1 hour by default)
+# Record radio stream (records for 1 hour by default)
 python scripts/record_stream.py --duration 3600
 
 # Clean and segment audio
-python scripts/clean_audio.py --input data/kameme_raw --output data/kameme_clean
+python scripts/clean_audio.py --input data/radio_raw --output data/radio_clean
 
 # Normalize transcription text
 python scripts/normalize_text.py --input data/transcripts/raw.jsonl --output data/transcripts/manifest.jsonl
@@ -40,8 +40,8 @@ python scripts/finetune.py --config configs/config.yaml
 ├── configs/config.yaml  # Training and inference config
 ├── data/
 │   ├── waxal_kikuyu/    # Google WAXAL Kikuyu subset
-│   ├── kameme_raw/      # Raw radio recordings
-│   ├── kameme_clean/    # Processed utterance clips
+│   ├── radio_raw/      # Raw radio recordings
+│   ├── radio_clean/    # Processed utterance clips
 │   └── transcripts/     # JSONL manifests
 ├── scripts/
 │   ├── download_waxal.py
@@ -57,7 +57,7 @@ python scripts/finetune.py --config configs/config.yaml
 ```python
 from wanjiku_tts import WanjikuTTS
 
-tts = WanjikuTTS(model_path="models/checkpoints/kameme-v1")
+tts = WanjikuTTS(model_path="models/checkpoints/wanjiku-v1")
 tts.synthesize("Ũhoro wa mũthenya", output="speech.wav")
 
 # Voice cloning with 3-second reference
@@ -67,7 +67,7 @@ tts.synthesize("Ũhoro wa mũthenya", reference_audio="presenter.wav", output="s
 ## Data Sources
 
 - [Google WAXAL](https://blog.google/intl/en-africa/company-news/outreach-and-initiatives/introducing-waxal-a-new-open-dataset-for-african-speech-technology/) — Open Kikuyu speech dataset
-- Kameme FM live stream — Broadcast voice recordings
+- Kikuyu radio live stream — Broadcast voice recordings
 
 ## License
 

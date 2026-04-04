@@ -1,7 +1,7 @@
 # Wanjiku TTS Configuration
 
 stream:
-  url: "https://radio.or.ke/kameme/"
+  url: ""  # Set your Kikuyu radio stream URL here
   format: mp3
   sample_rate: 24000
 
@@ -14,8 +14,8 @@ audio:
 
 data:
   waxal_dir: data/waxal_kikuyu
-  kameme_raw_dir: data/kameme_raw
-  kameme_clean_dir: data/kameme_clean
+  radio_raw_dir: data/radio_raw
+  radio_clean_dir: data/radio_clean
   transcripts_dir: data/transcripts
   manifest: data/transcripts/manifest.jsonl
 
@@ -31,7 +31,7 @@ training:
     warmup_steps: 500
     max_steps: 50000
     fp16: true
-  phase2:  # Kameme voice style
+  phase2:  # broadcast voice style
     learning_rate: 5.0e-6
     batch_size: 4
     gradient_accumulation_steps: 4

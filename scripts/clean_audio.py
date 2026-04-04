@@ -1,4 +1,4 @@
-"""Clean, segment, and normalize Kameme FM audio recordings."""
+"""Clean, segment, and normalize radio broadcast audio recordings."""
 import argparse
 import json
 from pathlib import Path
