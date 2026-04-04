@@ -48,10 +48,12 @@ def load_manifest(manifest_path, audio_dir):
     }).cast_column("audio", Audio(sampling_rate=16000))
 
 
-def prepare_batch(batch, processor):
+def prepare_batch(batch, processor, max_length=160000):
     audio = batch["audio"]
+    # Cap at 10 seconds (160000 samples at 16kHz)
+    array = audio["array"][:max_length]
     batch["input_values"] = processor(
-        audio["array"], sampling_rate=16000, return_tensors="pt"
+        array, sampling_rate=16000, return_tensors="pt"
     ).input_values[0]
     batch["labels"] = processor(text=batch["text"]).input_ids
     return batch
@@ -99,8 +101,8 @@ def main():
 
     training_args = TrainingArguments(
         output_dir=str(out_dir),
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=8,
         learning_rate=1e-4,
         warmup_steps=100,
         num_train_epochs=10,
