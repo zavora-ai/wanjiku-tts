@@ -7,8 +7,11 @@ Usage:
 """
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Dict, List, Union
 
+import numpy as np
 import torch
 import yaml
 from datasets import Dataset, Audio
@@ -18,6 +21,23 @@ from transformers import (
     TrainingArguments,
     Trainer,
 )
+
+
+@dataclass
+class DataCollatorCTCWithPadding:
+    processor: AutoProcessor
+    padding: Union[bool, str] = True
+
+    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+        input_values = [{"input_values": f["input_values"]} for f in features]
+        label_features = [{"input_ids": f["labels"]} for f in features]
+
+        batch = self.processor.pad(input_values, padding=self.padding, return_tensors="pt")
+        labels_batch = self.processor.pad(labels=label_features, padding=self.padding, return_tensors="pt")
+
+        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
+        batch["labels"] = labels
+        return batch
 
 
 def load_manifest(manifest_path, audio_dir):
@@ -99,6 +119,7 @@ def main():
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
+        data_collator=DataCollatorCTCWithPadding(processor=processor),
     )
 
     print("Training...")
