@@ -103,10 +103,10 @@ def main():
         output_dir=str(out_dir),
         per_device_train_batch_size=2,
         gradient_accumulation_steps=8,
-        learning_rate=1e-4,
-        warmup_steps=100,
-        num_train_epochs=10,
-        fp16=True,
+        learning_rate=3e-5,
+        warmup_steps=200,
+        num_train_epochs=20,
+        fp16=False,
         logging_steps=50,
         save_steps=500,
         save_total_limit=3,
@@ -114,6 +114,7 @@ def main():
         eval_steps=500,
         report_to="none",
         dataloader_num_workers=2,
+        max_grad_norm=1.0,
     )
 
     trainer = Trainer(
