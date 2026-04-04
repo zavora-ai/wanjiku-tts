@@ -38,7 +38,7 @@ Build a production-quality Kikuyu Text-to-Speech system fine-tuned on Kikuyu bro
 
 ### 2.1 Base Model
 
-**Qwen3-TTS-1.7B-Base** (Apache 2.0)
+**Qwen3-TTS-12Hz-1.7B-Base** (Apache 2.0)
 
 - Dual-track autoregressive architecture
 - X-vector speaker embeddings for voice cloning
@@ -125,7 +125,7 @@ The `scripts/normalize_text.py` handles:
 
 ### 4.1 Phase 1: Language Adaptation (WAXAL)
 
-Fine-tune Qwen3-TTS-1.7B-Base on the WAXAL Kikuyu dataset to learn:
+Fine-tune Qwen3-TTS-12Hz-1.7B-Base on the WAXAL Kikuyu dataset to learn:
 - Kikuyu phoneme inventory (including prenasalized stops: mb, nd, ng, nj)
 - Tonal patterns (Kikuyu has two tones: high and low)
 - Prosodic patterns specific to Kikuyu
@@ -228,7 +228,18 @@ tts.synthesize("Ũhoro wa mũthenya", reference_audio="presenter.wav", output="s
 - Batch processing of text scripts → audio files
 - CLI + Python API
 
-### 7.2 Future (v2)
+### 7.2 AWS Infrastructure
+
+| Resource | Details |
+|----------|---------|
+| S3 Bucket | `s3://wanjiku-tts-971994957690` |
+| EC2 Instance | `i-076aaa7423b670d2a` (g5.2xlarge, A10G 24GB) |
+| Region | us-east-1 |
+| AMI | Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 22.04) |
+| Storage | 200GB gp3 |
+| SSH Key | `wanjiku-tts-key.pem` |
+
+### 7.3 Future (v2)
 
 - FastAPI server with REST endpoint
 - Streaming WebSocket synthesis

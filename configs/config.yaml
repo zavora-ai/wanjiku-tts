@@ -19,8 +19,13 @@ data:
   transcripts_dir: data/transcripts
   manifest: data/transcripts/manifest.jsonl
 
+aws:
+  s3_bucket: wanjiku-tts-971994957690
+  region: us-east-1
+  instance_id: i-076aaa7423b670d2a
+
 model:
-  base: Qwen/Qwen3-TTS-1.7B-Base
+  base: Qwen/Qwen3-TTS-12Hz-1.7B-Base
   checkpoint_dir: models/checkpoints
 
 training:

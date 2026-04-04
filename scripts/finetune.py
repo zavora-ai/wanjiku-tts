@@ -4,8 +4,12 @@ from pathlib import Path
 
 import torch
 import yaml
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+from transformers import AutoConfig, AutoModel, AutoProcessor, TrainingArguments, Trainer
 from datasets import load_from_disk
+
+from qwen_tts.core.configuration_qwen3_tts import Qwen3TTSConfig
+from qwen_tts.core.modeling_qwen3_tts import Qwen3TTSForConditionalGeneration
+from qwen_tts.core.processing_qwen3_tts import Qwen3TTSProcessor
 
 
 def load_config(path):
@@ -42,14 +46,18 @@ def main():
     dataset = load_from_disk(str(data_path))
     print(f"Loaded {len(dataset)} samples")
 
-    # NOTE: The actual Qwen3-TTS fine-tuning API may differ from standard HuggingFace Trainer.
-    # This is a scaffold — update model loading and training loop once qwen-tts fine-tuning
-    # docs are available. The qwen-tts package may provide its own fine-tuning utilities.
+    # Register Qwen3-TTS model types
+    AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
+    AutoModel.register(Qwen3TTSConfig, Qwen3TTSForConditionalGeneration)
+    AutoProcessor.register(Qwen3TTSConfig, Qwen3TTSProcessor)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, trust_remote_code=True, torch_dtype=torch.float16
+    # Load model and processor
+    model = AutoModel.from_pretrained(
+        model_name, torch_dtype=torch.float16, device_map="cuda", trust_remote_code=True
     )
+    processor = AutoProcessor.from_pretrained(model_name, trust_remote_code=True)
+
+    print(f"Model loaded. GPU mem: {torch.cuda.memory_allocated()/1e9:.1f} GB")
 
     output_dir = Path(cfg["model"]["checkpoint_dir"]) / f"phase{args.phase}"
     training_args = TrainingArguments(
@@ -70,12 +78,22 @@ def main():
         model=model,
         args=training_args,
         train_dataset=dataset,
-        tokenizer=tokenizer,
+        tokenizer=processor,
     )
 
     trainer.train(resume_from_checkpoint=args.resume)
     trainer.save_model(str(output_dir / "final"))
     print(f"Model saved to {output_dir / 'final'}")
+
+    # Sync to S3 if configured
+    s3_bucket = cfg.get("aws", {}).get("s3_bucket")
+    if s3_bucket:
+        import subprocess
+        subprocess.run([
+            "aws", "s3", "sync", str(output_dir),
+            f"s3://{s3_bucket}/models/checkpoints/phase{args.phase}"
+        ], check=True)
+        print(f"Checkpoints synced to s3://{s3_bucket}/models/checkpoints/phase{args.phase}")
 
 
 if __name__ == "__main__":

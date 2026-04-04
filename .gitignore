@@ -13,3 +13,4 @@ __pycache__/
 
 # Keys
 *.pem
+test_output.wav

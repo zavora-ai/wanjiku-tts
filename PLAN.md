@@ -103,7 +103,7 @@ Local Machine                          AWS
 - [ ] Launch EC2 GPU instance (p3.2xlarge minimum, p4d.24xlarge preferred)
 - [ ] Install training dependencies on instance (torch, qwen-tts, transformers)
 - [ ] Pull training data from S3 to instance local storage
-- [ ] Verify Qwen3-TTS-1.7B-Base loads and runs inference on English (sanity check)
+- [ ] Verify Qwen3-TTS-12Hz-1.7B-Base loads and runs inference on English (sanity check)
 - [ ] Set up checkpoint saving to S3 (every 1000 steps)
 
 ### 2.2 Phase 1 Training — Kikuyu Language Adaptation
