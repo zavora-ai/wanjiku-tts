@@ -78,6 +78,10 @@ def main():
     )
     model.load_adapter("kik")
 
+    # Re-initialize LM head with small weights (mismatched sizes cause random large values)
+    torch.nn.init.xavier_uniform_(model.lm_head.weight)
+    torch.nn.init.zeros_(model.lm_head.bias)
+
     # Freeze feature extractor, only train adapter + LM head
     model.freeze_feature_encoder()
     model.freeze_base_model()
@@ -103,8 +107,8 @@ def main():
         output_dir=str(out_dir),
         per_device_train_batch_size=2,
         gradient_accumulation_steps=8,
-        learning_rate=3e-5,
-        warmup_steps=200,
+        learning_rate=5e-6,
+        warmup_steps=50,
         num_train_epochs=20,
         fp16=False,
         logging_steps=50,
