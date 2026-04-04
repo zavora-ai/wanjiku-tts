@@ -24,7 +24,7 @@
 ### Data Flow
 
 ```
-WAXAL Kikuyu Dataset (1,250h)  ──┐
+WAXAL Kikuyu TTS (10.3h)       ──┐
                                   ├──▶ Phase 1: Language Adaptation ──▶ Kikuyu checkpoint
 Radio Broadcast Recordings (50h) ─┘                                          │
                                                                              ▼
@@ -37,23 +37,25 @@ Radio Broadcast Recordings (50h) ─┘                                         
 ### AWS Infrastructure
 
 ```
-Local Machine                          AWS
-┌──────────────┐                ┌─────────────────────┐
-│ Data capture  │───upload──▶   │  S3: wanjiku-tts/    │
-│ Audio cleaning│               │  ├── data/            │
-│ Transcription │               │  ├── models/          │
-└──────────────┘                │  └── logs/            │
-                                └─────────┬───────────┘
+Local Machine                          AWS (us-east-1)
+┌──────────────┐                ┌──────────────────────────┐
+│ Data capture  │───upload──▶   │  S3: wanjiku-tts-        │
+│ Audio cleaning│               │       971994957690/      │
+│ Transcription │               │  ├── data/waxal_kikuyu/  │
+└──────────────┘                │  ├── data/transcripts/   │
+                                │  └── models/checkpoints/ │
+                                └─────────┬────────────────┘
                                           │
-                                ┌─────────▼───────────┐
-                                │  EC2 GPU Instance    │
-                                │  (p3.2xlarge V100    │
-                                │   or p4d A100)       │
-                                │                      │
-                                │  - Pull data from S3 │
-                                │  - Train model       │
-                                │  - Push checkpoints  │
-                                └──────────────────────┘
+                                ┌─────────▼────────────────┐
+                                │  EC2 g5.2xlarge          │
+                                │  (A10G 24GB GPU)         │
+                                │  i-076aaa7423b670d2a     │
+                                │  200GB gp3               │
+                                │                          │
+                                │  - Pull data from S3     │
+                                │  - Train model           │
+                                │  - Push checkpoints      │
+                                └──────────────────────────┘
 ```
 
 ---
@@ -61,18 +63,20 @@ Local Machine                          AWS
 ## Phase 1 — Data Collection & Preparation (Weeks 1–4)
 
 ### 1.1 Environment Setup
-- [ ] Set up Python 3.10+ venv, install dependencies
-- [ ] Install ffmpeg locally
-- [ ] Configure AWS CLI with credentials
-- [ ] Create S3 bucket for project data and model artifacts
-- [ ] Verify GPU instance availability in target region (check quotas for p3/p4d)
+- [x] Set up Python 3.10+ venv, install dependencies
+- [x] Install ffmpeg on EC2 instance
+- [x] Configure AWS CLI with credentials
+- [x] Create S3 bucket (`s3://wanjiku-tts-971994957690`)
+- [x] Verify GPU instance availability (g5.2xlarge, 16 vCPU quota in us-east-1)
+- [x] Launch EC2 g5.2xlarge (A10G 24GB), attach IAM role for S3 access
+- [x] Verify Qwen3-TTS-12Hz-1.7B-Base loads and runs (4.2GB VRAM, voice cloning works)
 
 ### 1.2 WAXAL Dataset
-- [ ] Download Google WAXAL Kikuyu subset via HuggingFace
-- [ ] Inspect dataset: count hours, check audio quality, review transcription format
-- [ ] Convert to training format (24kHz mono WAV + JSONL manifest)
-- [ ] Upload processed WAXAL data to S3
-- [ ] Split: 95% train / 5% validation
+- [x] Download Google WAXAL Kikuyu TTS subset (`google/WaxalNLP`, `kik_tts`)
+- [x] Inspect dataset: 10.3h train, 1.3h val, 1.3h test, 8 speakers, 50/50 M/F
+- [x] Export to 24kHz mono WAV + JSONL manifests
+- [x] Upload to S3 (2,029 files, 2.1GB)
+- [x] Splits already provided by WAXAL: 1,602 train / 210 val / 214 test
 
 ### 1.3 Radio Broadcast Collection
 - [ ] Configure stream URL in config.yaml
@@ -93,23 +97,23 @@ Local Machine                          AWS
 - [ ] Test normalizer on 100 sample sentences, fix edge cases
 - [ ] Run normalizer on full transcript set
 
-### Milestone: ✅ 1,250h+ WAXAL + 50h+ broadcast data, cleaned, transcribed, on S3
+### Milestone: ✅ 10.3h WAXAL on S3. Broadcast data collection in progress.
 
 ---
 
 ## Phase 2 — Model Training (Weeks 5–8)
 
 ### 2.1 Training Infrastructure
-- [ ] Launch EC2 GPU instance (p3.2xlarge minimum, p4d.24xlarge preferred)
-- [ ] Install training dependencies on instance (torch, qwen-tts, transformers)
+- [x] Launch EC2 GPU instance (g5.2xlarge, A10G 24GB)
+- [x] Install training dependencies on instance (torch 2.11, qwen-tts 0.1.1, transformers 4.57)
+- [x] Verify Qwen3-TTS-12Hz-1.7B-Base loads and runs inference (4.2GB VRAM, peak 4.6GB)
 - [ ] Pull training data from S3 to instance local storage
-- [ ] Verify Qwen3-TTS-12Hz-1.7B-Base loads and runs inference on English (sanity check)
 - [ ] Set up checkpoint saving to S3 (every 1000 steps)
 
 ### 2.2 Phase 1 Training — Kikuyu Language Adaptation
 - [ ] Fine-tune on WAXAL Kikuyu data
   - LR: 1e-5, batch: 8, grad accum: 4, warmup: 500, max steps: 50,000
-  - Estimated: 24–48 hours on A100
+  - Estimated: 12–24 hours on A10G
 - [ ] Monitor training loss, check for divergence
 - [ ] Generate sample outputs every 5,000 steps — listen for Kikuyu phoneme quality
 - [ ] Select best checkpoint based on validation loss
@@ -245,14 +249,15 @@ The WAXAL download and processing can happen in parallel with radio recording. T
 
 | Resource | Spec | Hours | $/hr | Total |
 |----------|------|-------|------|-------|
-| EC2 p3.2xlarge (V100) | Phase 1 training | 48 | ~$3.06 | ~$147 |
-| EC2 p3.2xlarge (V100) | Phase 2 training | 12 | ~$3.06 | ~$37 |
-| EC2 p3.2xlarge (V100) | Iteration/eval | 20 | ~$3.06 | ~$61 |
-| S3 storage | ~500GB | 720 (month) | ~$0.023/GB | ~$12 |
-| Data transfer | uploads/downloads | — | — | ~$10 |
-| **Total estimate** | | | | **~$267** |
+| EC2 g5.2xlarge (A10G) | Phase 1 training | 24 | ~$1.21 | ~$29 |
+| EC2 g5.2xlarge (A10G) | Phase 2 training | 12 | ~$1.21 | ~$15 |
+| EC2 g5.2xlarge (A10G) | Iteration/eval | 20 | ~$1.21 | ~$24 |
+| EC2 g5.2xlarge (A10G) | Setup/debugging (spent) | ~3 | ~$1.21 | ~$4 |
+| S3 storage | ~5GB | 720 (month) | ~$0.023/GB | ~$0.12 |
+| Data transfer | uploads/downloads | — | — | ~$2 |
+| **Total estimate** | | | | **~$74** |
 
-Use spot instances to cut EC2 costs by ~60–70%. Budget $100–150 with spots.
+Use spot instances to cut EC2 costs by ~60–70%. Budget ~$30–40 with spots.
 
 > For current pricing, check the [AWS Pricing Calculator](https://calculator.aws/).
 
@@ -268,4 +273,4 @@ Use spot instances to cut EC2 costs by ~60–70%. Budget $100–150 with spots.
 | R4 | Code-switching breaks synthesis | High | Medium | Explicit code-switched training examples; language tags | ML lead |
 | R5 | GPU spot instance interruption | Medium | Low | Checkpoint every 1000 steps to S3; auto-resume | Infra |
 | R6 | Transcription bottleneck delays project | High | Medium | Start recording early; use Whisper bootstrap to speed review | Data lead |
-| R7 | WAXAL dataset format incompatible | Low | Medium | Inspect dataset early (Week 1); write conversion script | Data lead |
+| R7 | WAXAL dataset format incompatible | ~~Low~~ Resolved | ~~Medium~~ | ✅ Dataset downloaded, decoded, exported to WAV successfully |

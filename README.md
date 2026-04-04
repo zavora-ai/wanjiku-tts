@@ -55,13 +55,18 @@ python scripts/finetune.py --config configs/config.yaml
 ## Usage
 
 ```python
-from wanjiku_tts import WanjikuTTS
+from qwen_tts import Qwen3TTSModel
+import torch, soundfile as sf
 
-tts = WanjikuTTS(model_path="models/checkpoints/wanjiku-v1")
-tts.synthesize("Ũhoro wa mũthenya", output="speech.wav")
+model = Qwen3TTSModel.from_pretrained("models/checkpoints/wanjiku-v1", torch_dtype=torch.float16, device_map="cuda")
 
 # Voice cloning with 3-second reference
-tts.synthesize("Ũhoro wa mũthenya", reference_audio="presenter.wav", output="speech.wav")
+audios, sr = model.generate_voice_clone(
+    text="Ũhoro wa mũthenya",
+    ref_audio="presenter.wav",
+    ref_text="Reference text from the clip",
+)
+sf.write("speech.wav", audios[0], sr)
 ```
 
 ## Data Sources

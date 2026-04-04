@@ -54,19 +54,21 @@ Build a production-quality Kikuyu Text-to-Speech system fine-tuned on Kikuyu bro
 | Apache 2.0 license | Commercial deployment |
 | Voice design mode | Create new Kikuyu voices from text descriptions |
 | Streaming support | Future real-time deployment |
-| 1.7B parameters | Trainable on a single A100/H100 GPU |
+| 1.7B parameters | Trainable on a single A10G 24GB GPU (4.2GB VRAM at inference) |
 
 ---
 
 ## 3. Data Strategy
 
-### 3.1 Primary Dataset: Google WAXAL (Kikuyu subset)
+### 3.1 Primary Dataset: Google WAXAL (Kikuyu TTS subset)
 
-- **Source**: Google Research WAXAL open dataset (released Feb 2026)
-- **Content**: ~1,250 hours transcribed Kikuyu speech + ~20 hours studio-quality recordings
-- **Format**: WAV audio + text transcriptions
-- **License**: Open (check specific WAXAL license terms)
+- **Source**: Google Research WAXAL open dataset (`google/WaxalNLP`, config `kik_tts`)
+- **Content**: 10.3 hours studio-quality Kikuyu TTS recordings (1,602 train / 210 val / 214 test)
+- **Speakers**: 8 unique (4 female, 4 male)
+- **Format**: 24kHz mono WAV + JSONL manifests
+- **License**: CC-BY-SA-4.0 (provider: Loud and Clear)
 - **Purpose**: Teach the model Kikuyu phonology, prosody, and vocabulary
+- **Status**: ✅ Downloaded, exported, backed up to S3
 
 **Download script**: `scripts/download_waxal.py`
 
@@ -140,8 +142,8 @@ max_steps: 50000
 fp16: true
 ```
 
-**Hardware**: 1x NVIDIA A100 80GB (or equivalent)
-**Estimated time**: ~24–48 hours
+**Hardware**: 1x NVIDIA A10G 24GB (g5.2xlarge) — verified: model uses 4.2GB VRAM, peak 4.6GB
+**Estimated time**: ~12–24 hours
 
 ### 4.2 Phase 2: Voice Style Adaptation (radio station)
 
@@ -198,24 +200,28 @@ Extract x-vector speaker embeddings from target radio presenters:
 ### 6.1 CLI Usage
 
 ```bash
-# Basic synthesis
-python -m wanjiku_tts --text "Ũhoro wa mũthenya" --output speech.wav
+# Voice cloning with reference audio
+python -m wanjiku_tts --text "Ũhoro wa mũthenya" --ref-audio presenter.wav --output speech.wav
 
-# With voice cloning
-python -m wanjiku_tts --text "Ũhoro wa mũthenya" --reference presenter.wav --output speech.wav
-
-# With voice description
+# With voice description (VoiceDesign model)
 python -m wanjiku_tts --text "Ũhoro wa mũthenya" --voice-desc "warm male Kikuyu broadcaster, authoritative" --output speech.wav
 ```
 
 ### 6.2 Python API
 
 ```python
-from wanjiku_tts import WanjikuTTS
+from qwen_tts import Qwen3TTSModel
+import torch, soundfile as sf
 
-tts = WanjikuTTS(model_path="models/checkpoints/wanjiku-v1")
-tts.synthesize("Ũhoro wa mũthenya", output="speech.wav")
-tts.synthesize("Ũhoro wa mũthenya", reference_audio="presenter.wav", output="speech.wav")
+model = Qwen3TTSModel.from_pretrained("models/checkpoints/wanjiku-v1", torch_dtype=torch.float16, device_map="cuda")
+
+# Voice cloning
+audios, sr = model.generate_voice_clone(
+    text="Ũhoro wa mũthenya",
+    ref_audio="presenter.wav",
+    ref_text="Reference text spoken in the clip",
+)
+sf.write("speech.wav", audios[0], sr)
 ```
 
 ---
