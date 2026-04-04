@@ -1,0 +1,15 @@
+# Data
+data/
+models/checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# OS
+.DS_Store
+
+# Keys
+*.pem

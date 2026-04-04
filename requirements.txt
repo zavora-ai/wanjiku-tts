@@ -1,0 +1,14 @@
+qwen-tts>=0.1.0
+transformers>=4.40
+torch>=2.2
+torchaudio>=2.2
+demucs>=4.0
+pydub>=0.25
+noisereduce>=3.0
+pyloudnorm>=0.1
+soundfile>=0.12
+datasets>=2.18
+ffmpeg-python>=0.2
+requests>=2.31
+tqdm>=4.66
+pyyaml>=6.0

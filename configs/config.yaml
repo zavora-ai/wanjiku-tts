@@ -1,0 +1,40 @@
+# Wanjiku TTS Configuration
+
+stream:
+  url: "https://radio.or.ke/kameme/"
+  format: mp3
+  sample_rate: 24000
+
+audio:
+  target_sample_rate: 24000
+  channels: 1
+  min_duration: 3.0    # seconds
+  max_duration: 15.0
+  target_lufs: -23.0   # EBU R128
+
+data:
+  waxal_dir: data/waxal_kikuyu
+  kameme_raw_dir: data/kameme_raw
+  kameme_clean_dir: data/kameme_clean
+  transcripts_dir: data/transcripts
+  manifest: data/transcripts/manifest.jsonl
+
+model:
+  base: Qwen/Qwen3-TTS-1.7B-Base
+  checkpoint_dir: models/checkpoints
+
+training:
+  phase1:  # WAXAL Kikuyu adaptation
+    learning_rate: 1.0e-5
+    batch_size: 8
+    gradient_accumulation_steps: 4
+    warmup_steps: 500
+    max_steps: 50000
+    fp16: true
+  phase2:  # Kameme voice style
+    learning_rate: 5.0e-6
+    batch_size: 4
+    gradient_accumulation_steps: 4
+    warmup_steps: 200
+    max_steps: 10000
+    fp16: true
