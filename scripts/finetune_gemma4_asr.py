@@ -1,175 +1,201 @@
-"""
-Fine-tune Gemma 4 E2B for Kikuyu ASR using LoRA on WAXAL dataset.
+"""Fine-tune Gemma 4 E2B for Kikuyu ASR using Unsloth.
 
-Usage:
-    python scripts/finetune_gemma4_asr.py
-    python scripts/finetune_gemma4_asr.py --resume models/gemma4_asr/checkpoint-500
+Based on the official Unsloth Gemma4_(E2B)-Audio.ipynb pattern.
+Loads DigiGreen + WAXAL manifests, trains LoRA on audio→text.
 """
-import argparse
-import json
+import os, json, torch
+import numpy as np
+import soundfile as sf
 from pathlib import Path
 
-import torch
-import soundfile as sf
-import librosa
-from datasets import Dataset
-from transformers import (
-    AutoProcessor,
-    AutoModelForMultimodalLM,
-    TrainingArguments,
-    Trainer,
+# ── Config ──────────────────────────────────────────────────────
+MODEL_NAME = "unsloth/gemma-4-E2B-it"
+MANIFEST_DIR = os.path.expanduser("~/wanjiku-tts/data/manifests/digigreen")
+OUTPUT_DIR = os.path.expanduser("~/wanjiku-tts/models/gemma4_kikuyu_asr")
+MAX_SEQ_LENGTH = 8192
+TARGET_SR = 16000
+INSTRUCTION = "Transcribe this Kikuyu speech accurately. Output only the transcription."
+
+# Training hyperparams
+BATCH_SIZE = 1
+GRAD_ACCUM = 4
+LR = 5e-5
+MAX_STEPS = 2000       # ~8000 effective samples with grad_accum=4
+WARMUP_RATIO = 0.03
+LORA_R = 16
+LORA_ALPHA = 32
+LOGGING_STEPS = 50
+SAVE_STEPS = 500
+
+# ── Load model ──────────────────────────────────────────────────
+print("Loading Gemma 4 E2B...")
+from unsloth import FastModel
+
+model, processor = FastModel.from_pretrained(
+    model_name=MODEL_NAME,
+    dtype=None,
+    max_seq_length=MAX_SEQ_LENGTH,
+    load_in_4bit=True,
+    full_finetuning=False,
 )
-from peft import LoraConfig, get_peft_model
 
-MODEL_ID = "google/gemma-4-e2b-it"
-MAX_AUDIO_SEC = 30
-PROMPT = (
-    "Transcribe the following speech segment in Kikuyu into Kikuyu text. "
-    "Follow these specific instructions for formatting the answer:\n"
-    "* Only output the transcription, with no newlines.\n"
-    "* When transcribing numbers, write the digits."
+# ── Apply LoRA ──────────────────────────────────────────────────
+print("Applying LoRA...")
+model = FastModel.get_peft_model(
+    model,
+    finetune_vision_layers=False,
+    finetune_language_layers=True,
+    finetune_attention_modules=True,
+    finetune_mlp_modules=True,
+    r=LORA_R,
+    lora_alpha=LORA_ALPHA,
+    lora_dropout=0,
+    bias="none",
+    random_state=42,
+    target_modules=[
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
+        "post", "linear_start", "linear_end", "embedding_projection",
+    ],
 )
 
+# ── Load data ───────────────────────────────────────────────────
+def load_manifest(path):
+    items = []
+    with open(path) as f:
+        for line in f:
+            items.append(json.loads(line))
+    return items
 
-def load_waxal(manifest_path, audio_dir):
-    entries = [json.loads(l) for l in open(manifest_path)]
-    return [{"audio_path": str(audio_dir / e["audio"]), "text": e["text"]} for e in entries]
+def load_audio(path, target_sr=TARGET_SR):
+    """Load audio file and resample to target_sr."""
+    audio, sr = sf.read(path, dtype="float32")
+    if len(audio.shape) > 1:
+        audio = audio.mean(axis=1)  # mono
+    if sr != target_sr:
+        import librosa
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+    return audio
 
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--resume", default=None)
-    args = parser.parse_args()
-
-    out_dir = Path("models/gemma4_asr")
-
-    print("Loading processor and model...")
-    processor = AutoProcessor.from_pretrained(MODEL_ID)
-    model = AutoModelForMultimodalLM.from_pretrained(
-        MODEL_ID, dtype=torch.bfloat16, device_map={"": 0}
-    )
-
-    # LoRA config — target language model attention projections only
-    lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-        exclude_modules=["vision_tower.*", "audio_tower.*", "multi_modal_projector.*"],
-        lora_dropout=0.05,
-        task_type="CAUSAL_LM",
-    )
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-    model.enable_input_require_grads()
-
-    # Load data
-    print("Loading WAXAL data...")
-    train_data = load_waxal("data/transcripts/waxal_train.jsonl", Path("data/waxal_kikuyu"))
-    val_data = load_waxal("data/transcripts/waxal_validation.jsonl", Path("data/waxal_kikuyu"))
-    print(f"Train: {len(train_data)}, Val: {len(val_data)}")
-
-    # Preprocess: build input/label tensors
-    def preprocess(example):
-        audio, sr = sf.read(example["audio_path"], dtype="float32")
-        # Cap audio length
-        max_samples = MAX_AUDIO_SEC * sr
-        audio = audio[:max_samples]
-        if sr != 16000:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
-        sf.write("/tmp/_tmp_audio.wav", audio, 16000)
-
-        messages = [
-            {"role": "user", "content": [
-                {"type": "audio", "audio": "/tmp/_tmp_audio.wav"},
-                {"type": "text", "text": PROMPT},
-            ]},
-            {"role": "assistant", "content": [
-                {"type": "text", "text": example["text"]},
-            ]},
+def convert_to_conversation(item):
+    """Convert manifest item to Gemma 4 chat format."""
+    audio_array = load_audio(item["audio_path"])
+    return {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "audio", "audio": audio_array},
+                    {"type": "text", "text": INSTRUCTION},
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": item["text"]}],
+            },
         ]
+    }
 
-        inputs = processor.apply_chat_template(
-            messages, tokenize=True, return_dict=True, return_tensors="pt",
-        )
+print("Loading training data...")
+train_path = os.path.join(MANIFEST_DIR, "train.jsonl")
+train_items = load_manifest(train_path)
+print(f"  Train samples: {len(train_items)}")
 
-        input_ids = inputs["input_ids"].squeeze(0)
-        labels = input_ids.clone()
+# Convert to chat format (lazy — load audio on the fly during collation)
+# For large datasets, we convert in batches to avoid OOM
+print("Converting to conversation format...")
+converted_dataset = []
+errors = 0
+for i, item in enumerate(train_items):
+    if i % 2000 == 0 and i > 0:
+        print(f"  Converted {i}/{len(train_items)}...")
+    try:
+        converted_dataset.append(convert_to_conversation(item))
+    except Exception as e:
+        errors += 1
+        if errors <= 5:
+            print(f"  Error on {item['audio_path']}: {e}")
+print(f"  Converted: {len(converted_dataset)}, Errors: {errors}")
 
-        # Mask everything except the assistant response
-        # Find where assistant response starts
-        assistant_tokens = processor.tokenizer.encode(example["text"], add_special_tokens=False)
-        resp_len = len(assistant_tokens)
-        labels[:-resp_len] = -100
+# ── Train ───────────────────────────────────────────────────────
+print("Setting up trainer...")
+from unsloth.trainer import UnslothVisionDataCollator
+from trl import SFTTrainer, SFTConfig
 
-        return {
-            "input_ids": input_ids,
-            "attention_mask": inputs["attention_mask"].squeeze(0),
-            "labels": labels,
-        }
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print("Preprocessing train set...")
-    train_processed = []
-    skipped = 0
-    for ex in train_data:
-        try:
-            train_processed.append(preprocess(ex))
-        except Exception as e:
-            skipped += 1
-    print(f"  {len(train_processed)} samples ready, {skipped} skipped")
-
-    print("Preprocessing val set...")
-    val_processed = []
-    for ex in val_data:
-        try:
-            val_processed.append(preprocess(ex))
-        except Exception:
-            pass
-    print(f"  {len(val_processed)} samples ready")
-
-    # Custom collator for variable-length sequences
-    def collator(features):
-        max_len = max(f["input_ids"].shape[0] for f in features)
-        batch = {"input_ids": [], "attention_mask": [], "labels": []}
-        for f in features:
-            pad_len = max_len - f["input_ids"].shape[0]
-            batch["input_ids"].append(torch.cat([f["input_ids"], torch.zeros(pad_len, dtype=torch.long)]))
-            batch["attention_mask"].append(torch.cat([f["attention_mask"], torch.zeros(pad_len, dtype=torch.long)]))
-            batch["labels"].append(torch.cat([f["labels"], torch.full((pad_len,), -100, dtype=torch.long)]))
-        return {k: torch.stack(v) for k, v in batch.items()}
-
-    training_args = TrainingArguments(
-        output_dir=str(out_dir),
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=16,
-        learning_rate=2e-4,
-        warmup_steps=50,
-        num_train_epochs=3,
-        bf16=True,
-        logging_steps=10,
-        save_steps=250,
-        save_total_limit=2,
-        eval_strategy="steps",
-        eval_steps=250,
-        report_to="none",
+trainer = SFTTrainer(
+    model=model,
+    train_dataset=converted_dataset,
+    processing_class=processor.tokenizer,
+    data_collator=UnslothVisionDataCollator(model, processor),
+    args=SFTConfig(
+        per_device_train_batch_size=BATCH_SIZE,
+        gradient_accumulation_steps=GRAD_ACCUM,
         gradient_checkpointing=True,
-        dataloader_num_workers=0,
-        max_grad_norm=1.0,
-    )
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        max_grad_norm=0.3,
+        warmup_ratio=WARMUP_RATIO,
+        max_steps=MAX_STEPS,
+        learning_rate=LR,
+        logging_steps=LOGGING_STEPS,
+        save_steps=SAVE_STEPS,
+        optim="adamw_8bit",
+        lr_scheduler_type="cosine",
+        seed=42,
+        output_dir=OUTPUT_DIR,
+        report_to="none",
+        remove_unused_columns=False,
+        dataset_kwargs={"skip_prepare_dataset": True},
+        max_length=MAX_SEQ_LENGTH,
+        bf16=torch.cuda.is_bf16_supported(),
+        fp16=not torch.cuda.is_bf16_supported(),
+    ),
+)
 
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_processed,
-        eval_dataset=val_processed,
-        data_collator=collator,
-    )
+print(f"Starting training: {MAX_STEPS} steps, batch={BATCH_SIZE}×{GRAD_ACCUM}...")
+trainer_stats = trainer.train()
+print(f"Training complete. Loss: {trainer_stats.training_loss:.4f}")
 
-    print("Training...")
-    trainer.train(resume_from_checkpoint=args.resume)
-    trainer.save_model(str(out_dir / "final"))
-    processor.save_pretrained(str(out_dir / "final"))
-    print(f"Saved to {out_dir / 'final'}")
+# ── Save ────────────────────────────────────────────────────────
+print("Saving LoRA adapters...")
+model.save_pretrained(os.path.join(OUTPUT_DIR, "lora"))
+processor.save_pretrained(os.path.join(OUTPUT_DIR, "lora"))
 
+print("Saving merged model (float16)...")
+model.save_pretrained_merged(
+    os.path.join(OUTPUT_DIR, "merged"),
+    processor,
+    save_method="merged_16bit",
+)
 
-if __name__ == "__main__":
-    main()
+print(f"Done! Model saved to {OUTPUT_DIR}")
+
+# ── Quick eval ──────────────────────────────────────────────────
+print("\n=== Quick evaluation ===")
+dev_path = os.path.join(MANIFEST_DIR, "dev.jsonl")
+if os.path.exists(dev_path):
+    dev_items = load_manifest(dev_path)[:5]
+    for item in dev_items:
+        audio_array = load_audio(item["audio_path"])
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "audio", "audio": audio_array},
+                    {"type": "text", "text": INSTRUCTION},
+                ],
+            }
+        ]
+        inputs = processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        ).to("cuda")
+        outputs = model.generate(**inputs, max_new_tokens=256, use_cache=False, do_sample=False)
+        pred = processor.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_special_tokens=True)
+        print(f"  REF:  {item['text'][:80]}")
+        print(f"  PRED: {pred[:80]}")
+        print()
