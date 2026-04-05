@@ -6,8 +6,9 @@ For each chapter:
 3. Split audio at verse boundaries
 4. Output manifest with verse-level audio + normalized text
 """
-import os, json, re, sys, subprocess, torch, torchaudio
+import os, json, re, sys, subprocess
 import numpy as np
+import soundfile as sf
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
@@ -73,11 +74,14 @@ def segment_with_silence(audio_path, verses, out_dir):
     Simple approach: divide audio evenly by character count of verses.
     More accurate than silence detection for read Bible audio.
     """
-    # Load audio
-    waveform, sr = torchaudio.load(audio_path)
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    total_samples = waveform.shape[1]
+    # Load audio (convert MP3 to WAV via ffmpeg pipe)
+    result = subprocess.run(
+        ["ffmpeg", "-i", audio_path, "-f", "wav", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", "-"],
+        capture_output=True, timeout=60,
+    )
+    audio = np.frombuffer(result.stdout[44:], dtype=np.int16).astype(np.float32) / 32768.0
+    sr = 16000
+    total_samples = len(audio)
     total_duration = total_samples / sr
 
     # Calculate proportional split based on text length
@@ -110,11 +114,11 @@ def segment_with_silence(audio_path, verses, out_dir):
             continue
 
         # Save segment
-        segment = waveform[:, current_sample:end_sample]
+        segment = audio[current_sample:end_sample]
         book_ch = os.path.splitext(os.path.basename(audio_path))[0]
         fname = f"{book_ch}_v{vnum:03d}.wav"
         out_path = os.path.join(out_dir, fname)
-        torchaudio.save(out_path, segment, sr)
+        sf.write(out_path, segment, sr)
 
         segments.append({
             "audio_path": os.path.abspath(out_path),
