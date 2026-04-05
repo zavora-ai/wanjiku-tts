@@ -73,14 +73,11 @@ def main():
 
     print("Loading processor and model...")
     processor = AutoProcessor.from_pretrained("facebook/mms-1b-all", target_lang="kik")
-    model = Wav2Vec2ForCTC.from_pretrained(
-        "facebook/mms-1b-all", target_lang="kik", ignore_mismatched_sizes=True
-    )
+    
+    # Load model WITH the default adapter first (gets correct architecture)
+    # Then load Kikuyu adapter which sets up LM head correctly
+    model = Wav2Vec2ForCTC.from_pretrained("facebook/mms-1b-all", target_lang="kik")
     model.load_adapter("kik")
-
-    # Re-initialize LM head with small weights (mismatched sizes cause random large values)
-    torch.nn.init.xavier_uniform_(model.lm_head.weight)
-    torch.nn.init.zeros_(model.lm_head.bias)
 
     # Freeze feature extractor, only train adapter + LM head
     model.freeze_feature_encoder()
