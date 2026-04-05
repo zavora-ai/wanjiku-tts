@@ -41,12 +41,27 @@ model = FastModel.get_peft_model(
     ],
 )
 
-# Load WAXAL Kikuyu dataset
+# Load WAXAL Kikuyu dataset - use soundfile instead of torchcodec
 print("Loading WAXAL Kikuyu data...")
-ds = load_dataset("google/WaxalNLP", "kik_tts")
-ds = ds.cast_column("audio", Audio(sampling_rate=16000))
-train_ds = ds["train"]
-print(f"Train: {len(train_ds)} samples")
+import soundfile as sf
+import numpy as np
+
+def load_manifest(path, audio_dir):
+    entries = [json.loads(l) for l in open(path)]
+    samples = []
+    for e in entries:
+        audio, sr = sf.read(str(audio_dir / e["audio"]), dtype="float32")
+        # Resample to 16kHz if needed
+        if sr != 16000:
+            import librosa
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
+        # Cap at 30 seconds
+        audio = audio[:16000 * 30]
+        samples.append({"audio_array": audio, "text": e["text"]})
+    return samples
+
+train_data = load_manifest("data/transcripts/waxal_train.jsonl", Path("data/waxal_kikuyu"))
+print(f"Train: {len(train_data)} samples")
 
 # Convert to conversation format
 instruction = (
@@ -57,7 +72,7 @@ instruction = (
 def convert_to_conversation(sample):
     return {"messages": [
         {"role": "user", "content": [
-            {"type": "audio", "audio": sample["audio"]["array"]},
+            {"type": "audio", "audio": sample["audio_array"]},
             {"type": "text", "text": instruction},
         ]},
         {"role": "assistant", "content": [
@@ -66,7 +81,7 @@ def convert_to_conversation(sample):
     ]}
 
 print("Converting dataset...")
-converted = [convert_to_conversation(s) for s in train_ds]
+converted = [convert_to_conversation(s) for s in train_data]
 print(f"Converted {len(converted)} samples")
 
 # Train
