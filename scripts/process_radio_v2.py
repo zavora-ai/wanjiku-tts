@@ -156,12 +156,11 @@ def run_clean(input_dir, work_dir, clips_dir):
 
 
 def run_transcribe(clips_dir, work_dir, output_dir):
-    """Stage 4: Transcribe with Meta MMS Kikuyu ASR."""
-    from transformers import Wav2Vec2ForCTC, AutoProcessor
+    """Stage 4: Transcribe with Whisper-base-kikuyu."""
+    from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-    processor = AutoProcessor.from_pretrained("facebook/mms-1b-all", target_lang="kik")
-    model = Wav2Vec2ForCTC.from_pretrained("facebook/mms-1b-all", target_lang="kik", ignore_mismatched_sizes=True)
-    model.load_adapter("kik")
+    processor = WhisperProcessor.from_pretrained("MaryWambo/whisper-base-kikuyu4")
+    model = WhisperForConditionalGeneration.from_pretrained("MaryWambo/whisper-base-kikuyu4")
     if torch.cuda.is_available():
         model = model.to("cuda")
 
@@ -180,9 +179,8 @@ def run_transcribe(clips_dir, work_dir, output_dir):
             inputs = {k: v.to("cuda") for k, v in inputs.items()}
 
         with torch.no_grad():
-            logits = model(**inputs).logits
-        ids = torch.argmax(logits, dim=-1)[0]
-        entry["text"] = processor.decode(ids)
+            ids = model.generate(**inputs, max_new_tokens=256)
+        entry["text"] = processor.batch_decode(ids, skip_special_tokens=True)[0]
 
     # Write final manifest
     output_dir.mkdir(parents=True, exist_ok=True)
