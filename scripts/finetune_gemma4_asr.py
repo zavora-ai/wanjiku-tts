@@ -22,7 +22,7 @@ from transformers import (
 from peft import LoraConfig, get_peft_model
 
 MODEL_ID = "google/gemma-4-e2b-it"
-MAX_AUDIO_SEC = 15
+MAX_AUDIO_SEC = 30
 PROMPT = (
     "Transcribe the following speech segment in Kikuyu into Kikuyu text. "
     "Follow these specific instructions for formatting the answer:\n"
