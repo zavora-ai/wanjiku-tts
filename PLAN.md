@@ -1,276 +1,200 @@
-# Wanjiku TTS — Project Plan
+# Wanjiku TTS & ASR — Build Plan
 
-## Design Overview
+Two production-quality Kikuyu speech systems: ASR (speech-to-text) and TTS (text-to-speech).
+
+## Models
+
+| System | Base Model | Params | Method | VRAM |
+|--------|-----------|--------|--------|------|
+| **ASR** | Gemma 4 E2B (google/gemma-4-E2B) | 2.3B | Unsloth LoRA fine-tune | ~12GB |
+| **TTS** | Qwen3-TTS-12Hz-1.7B-Base | 1.7B | Voice cloning fine-tune | ~8GB |
+
+Infrastructure: EC2 g5.2xlarge (A10G 24GB), us-east-1.
+
+## Data Summary
+
+**Paired audio + text (ready for training):**
+| Dataset | Hours | Pairs | Notes |
+|---------|-------|-------|-------|
+| DigiGreen Kikuyu ASR | ~62h | 25,379 | Agriculture queries, multi-speaker |
+| Google WAXAL kik_tts | 10.3h | 2,026 | Image descriptions, 8 speakers |
+
+**Audio with text (needs forced alignment):**
+| Dataset | Hours | Notes |
+|---------|-------|-------|
+| Biblica Kikuyu Bible | ~113h | Single speaker, studio quality, USFM verse text |
+| GRN 5fish programs | 15.9h | Narrated Bible stories |
+
+**Audio only (needs ASR transcription):**
+| Dataset | Hours | Notes |
+|---------|-------|-------|
+| Radio (3 stations) | ~36h+ | Broadcast, multi-speaker, noisy |
+| Kikuyu course videos | ~4.8h | Bilingual English→Kikuyu |
+| Kikuyu Gospel songs | 2.0h | Singing — low priority |
+
+**Text only (for normalization, prompts, evaluation):**
+- FLORES-200: 2,009 sentences
+- SIB-200: 1,004 sentences
+- Bloom Library: 10 stories
+- Leipzig: 815 sentences
+- Bible USFM: full Kikuyu Bible
+- Translation pairs: ~6K (Kikuyu↔English, Kikuyu↔Swahili)
+
+---
+
+## Phase 1: Data Preparation
+*Goal: Clean, normalize, and align all data into training-ready format.*
+
+### 1.1 Text Normalizer
+Build a Kikuyu text normalizer that handles:
+- Diacritic unification: macron (ī,ū) → tilde (ĩ,ũ), Greek/breve (ῖ,ῦ,ŭ,ȋ) → tilde
+- Bare text detection (flag text missing diacritics for manual review)
+- Number normalization (digits → Kikuyu words)
+- Punctuation standardization
+- Loanword handling (English/Swahili words in Kikuyu text)
+
+### 1.2 DigiGreen Processing
+- Match 25,379 WAV files to 26,483 CSV transcripts (by filename)
+- Normalize transcripts through text normalizer
+- Validate audio (check duration, sample rate, silence)
+- Filter bad pairs (empty audio, mismatched transcripts)
+- Split: 90% train / 5% dev / 5% test
+- Output: manifest JSONL (path, text, duration, speaker_id)
+
+### 1.3 WAXAL Processing
+- Already paired — normalize transcripts (macron → tilde)
+- Validate and split
+- Output: manifest JSONL
+
+### 1.4 Bible Forced Alignment
+- Convert USFM → plain text per chapter (strip verse markers, keep verse boundaries)
+- Forced alignment using MMS wav2vec2 (facebook/mms-1b) to segment chapter MP3s into verse-level clips
+- Each verse becomes one training sample: audio clip + normalized text
+- Expected yield: ~8,000-10,000 verse segments from 1,189 chapters
+- Output: manifest JSONL
+
+### 1.5 Radio Processing
+- Run process_radio_v2.py pipeline on all recordings:
+  - SpeechBrain diarization → speaker segments
+  - Noise reduction
+  - ASR transcription (initially with MaryWambo/whisper-base-kikuyu4, later with our Gemma 4 ASR)
+  - Loudness normalization
+- Output: manifest JSONL (lower confidence — ASR-generated transcripts)
+
+### 1.6 S3 Backup
+- Sync all processed data to s3://wanjiku-tts-971994957690/
+
+---
+
+## Phase 2: ASR — Gemma 4 E2B Fine-tune
+*Goal: Best-in-class Kikuyu speech recognition.*
+
+### 2.1 Training Data Preparation
+- Combine DigiGreen (62h) + WAXAL (10h) + Bible aligned (est. 80h usable) = ~150h paired data
+- Format for Gemma 4: audio input + instruction prompt → text output
+- Prompt template: `"Transcribe this Kikuyu speech accurately."` + audio → normalized Kikuyu text
+- Create train/dev/test splits (stratified by source)
+
+### 2.2 Fine-tune with Unsloth
+- Load `unsloth/gemma-4-E2B-it` (instruction-tuned variant)
+- LoRA config: r=16, alpha=32, target_modules for audio+text layers
+- Training: ~3 epochs on 150h data
+- Batch size tuned to fit A10G 24GB
+- Evaluate on held-out test set (WER metric)
+
+### 2.3 Evaluation
+- WER on DigiGreen test set (agriculture domain)
+- WER on WAXAL test set (image descriptions)
+- WER on Bible test set (formal/religious)
+- Compare against: MaryWambo/whisper-base-kikuyu4, Gemma 4 zero-shot
+
+### 2.4 Bootstrap More Data
+- Use trained ASR to transcribe:
+  - Radio recordings (~36h) → new paired data
+  - GRN programs (16h) → new paired data
+  - Kikuyu course audio (5h) → new paired data
+- Human review sample for quality
+- Add to training set and retrain (Phase 2.5)
+
+---
+
+## Phase 3: TTS — Qwen3-TTS Fine-tune
+*Goal: Natural-sounding Kikuyu voice synthesis with voice cloning.*
+
+### 3.1 Training Data Preparation
+- Primary: Bible audio (single speaker, studio quality, ~80h after alignment)
+  - This is ideal for TTS: consistent voice, clean audio, diverse vocabulary
+- Secondary: DigiGreen (multi-speaker, for speaker diversity)
+- Format for Qwen3-TTS: text + reference audio → synthesized speech
+- All text normalized through Phase 1.1 normalizer
+
+### 3.2 Fine-tune Qwen3-TTS
+- Load `Qwen3TTSModel.from_pretrained("Qwen/Qwen3-TTS-12Hz-1.7B-Base")`
+- Fine-tune on Bible speaker first (single-speaker TTS)
+- Training config from qwen-tts documentation
+- Evaluate: MOS (Mean Opinion Score), intelligibility, speaker similarity
+
+### 3.3 Multi-speaker Extension
+- Add DigiGreen speakers for voice cloning diversity
+- Fine-tune voice cloning capability: given reference audio + text → speech in that voice
+- Target: clone any Kikuyu speaker from 10s of reference audio
+
+### 3.4 Evaluation
+- MOS listening tests (naturalness)
+- Intelligibility: synthesize text → run through ASR → compare to input (round-trip WER)
+- Speaker similarity: compare cloned voice to reference
+- Compare against: facebook/mms-tts-kik, gateremark/kikuyu-tts-v1
+
+---
+
+## Phase 4: Iteration & Optimization
+*Goal: Virtuous cycle between ASR and TTS.*
+
+### 4.1 ASR→TTS Data Loop
+- Use ASR to transcribe all remaining audio → more TTS training data
+- Use TTS to synthesize diverse text → data augmentation for ASR
+- Retrain both models on expanded data
+
+### 4.2 G2P Integration
+- Build rule-based Kikuyu G2P (phonemic orthography, rules defined in RESEARCH.md)
+- Integrate into TTS pipeline for pronunciation accuracy
+- Use G2P for ASR language model / decoder constraints
+
+### 4.3 Deployment Preparation
+- Quantize models (GGUF/AWQ) for inference efficiency
+- Build API endpoints (FastAPI)
+- Latency optimization for real-time use
+
+---
+
+## Execution Order
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        WANJIKU TTS SYSTEM                            │
-│                                                                      │
-│  ┌─────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────┐  │
-│  │  Kikuyu  │──▶│    Text      │──▶│  Qwen3-TTS   │──▶│  24kHz   │  │
-│  │  Text    │   │  Normalizer  │   │  (fine-tuned) │   │  WAV     │  │
-│  └─────────┘   └──────────────┘   └──────┬───────┘   └──────────┘  │
-│                                          │                           │
-│                                   ┌──────┴───────┐                   │
-│                                   │   Speaker     │                   │
-│                                   │   Embedding   │                   │
-│                                   │  (x-vector)   │                   │
-│                                   └──────────────┘                   │
-│                                                                      │
-│  Modes: voice cloning (3s ref) │ voice design │ preset speakers      │
-└──────────────────────────────────────────────────────────────────────┘
+Week 1:  Phase 1.1 (normalizer) + 1.2 (DigiGreen) + 1.3 (WAXAL)
+Week 2:  Phase 1.4 (Bible alignment) + 1.5 (radio pipeline)
+Week 3:  Phase 2.1-2.2 (ASR training)
+Week 4:  Phase 2.3-2.4 (ASR eval + bootstrap)
+Week 5:  Phase 3.1-3.2 (TTS training)
+Week 6:  Phase 3.3-3.4 (TTS multi-speaker + eval)
+Week 7+: Phase 4 (iteration)
 ```
 
-### Data Flow
+## Cost Estimate
 
-```
-WAXAL Kikuyu TTS (10.3h)       ──┐
-                                  ├──▶ Phase 1: Language Adaptation ──▶ Kikuyu checkpoint
-Radio Broadcast Recordings (50h) ─┘                                          │
-                                                                             ▼
-                                       Phase 2: Voice Style Fine-tune ──▶ Final Model
-                                                                             │
-                                       Phase 3: Speaker Embedding    ──▶ Voice Cloning
-                                                Extraction                   Ready
-```
+- EC2 g5.2xlarge: ~$1.21/hr × ~12hr/day × 42 days = ~$610
+- S3 storage: ~$5/month
+- Total: ~$620
 
-### AWS Infrastructure
+## Success Criteria
 
-```
-Local Machine                          AWS (us-east-1)
-┌──────────────┐                ┌──────────────────────────┐
-│ Data capture  │───upload──▶   │  S3: wanjiku-tts-        │
-│ Audio cleaning│               │       971994957690/      │
-│ Transcription │               │  ├── data/waxal_kikuyu/  │
-└──────────────┘                │  ├── data/transcripts/   │
-                                │  └── models/checkpoints/ │
-                                └─────────┬────────────────┘
-                                          │
-                                ┌─────────▼────────────────┐
-                                │  EC2 g5.2xlarge          │
-                                │  (A10G 24GB GPU)         │
-                                │  i-076aaa7423b670d2a     │
-                                │  200GB gp3               │
-                                │                          │
-                                │  - Pull data from S3     │
-                                │  - Train model           │
-                                │  - Push checkpoints      │
-                                └──────────────────────────┘
-```
+| Metric | Target | Baseline |
+|--------|--------|----------|
+| ASR WER (DigiGreen test) | <20% | ~45% (Gemma 4 zero-shot) |
+| ASR WER (Bible test) | <15% | N/A |
+| TTS MOS | >3.5/5 | ~2.0 (mms-tts-kik) |
+| TTS intelligibility (round-trip WER) | <25% | N/A |
+| Voice cloning similarity | >0.7 cosine | N/A |
 
 ---
 
-## Phase 1 — Data Collection & Preparation (Weeks 1–4)
-
-### 1.1 Environment Setup
-- [x] Set up Python 3.10+ venv, install dependencies
-- [x] Install ffmpeg on EC2 instance
-- [x] Configure AWS CLI with credentials
-- [x] Create S3 bucket (`s3://wanjiku-tts-971994957690`)
-- [x] Verify GPU instance availability (g5.2xlarge, 16 vCPU quota in us-east-1)
-- [x] Launch EC2 g5.2xlarge (A10G 24GB), attach IAM role for S3 access
-- [x] Verify Qwen3-TTS-12Hz-1.7B-Base loads and runs (4.2GB VRAM, voice cloning works)
-
-### 1.2 WAXAL Dataset
-- [x] Download Google WAXAL Kikuyu TTS subset (`google/WaxalNLP`, `kik_tts`)
-- [x] Inspect dataset: 10.3h train, 1.3h val, 1.3h test, 8 speakers, 50/50 M/F
-- [x] Export to 24kHz mono WAV + JSONL manifests
-- [x] Upload to S3 (2,029 files, 2.1GB)
-- [x] Splits already provided by WAXAL: 1,602 train / 210 val / 214 test
-
-### 1.3 Radio Broadcast Collection
-- [ ] Configure stream URL in config.yaml
-- [ ] Record initial 20 hours of broadcast audio (multiple sessions across different shows)
-- [ ] Run speech separation (Demucs) to isolate vocals from music/jingles
-- [ ] Run VAD + segmentation into 5–15 second utterance clips
-- [ ] Run noise reduction and loudness normalization (EBU R128, -23 LUFS)
-- [ ] Bootstrap transcriptions using Whisper large-v3
-- [ ] Manual review and correction of transcriptions (native Kikuyu speaker required)
-- [ ] Label speaker IDs for each segment
-- [ ] Continue recording to reach 50+ hours target
-- [ ] Upload cleaned broadcast data to S3
-
-### 1.4 Text Normalization
-- [ ] Validate Kikuyu number expansion rules with native speaker
-- [ ] Add missing abbreviation expansions common in broadcasts
-- [ ] Handle Kikuyu tone diacritics (ĩ, ũ) — verify preservation through pipeline
-- [ ] Test normalizer on 100 sample sentences, fix edge cases
-- [ ] Run normalizer on full transcript set
-
-### Milestone: ✅ 10.3h WAXAL on S3. Broadcast data collection in progress.
-
----
-
-## Phase 2 — Model Training (Weeks 5–8)
-
-### 2.1 Training Infrastructure
-- [x] Launch EC2 GPU instance (g5.2xlarge, A10G 24GB)
-- [x] Install training dependencies on instance (torch 2.11, qwen-tts 0.1.1, transformers 4.57)
-- [x] Verify Qwen3-TTS-12Hz-1.7B-Base loads and runs inference (4.2GB VRAM, peak 4.6GB)
-- [ ] Pull training data from S3 to instance local storage
-- [ ] Set up checkpoint saving to S3 (every 1000 steps)
-
-### 2.2 Phase 1 Training — Kikuyu Language Adaptation
-- [ ] Fine-tune on WAXAL Kikuyu data
-  - LR: 1e-5, batch: 8, grad accum: 4, warmup: 500, max steps: 50,000
-  - Estimated: 12–24 hours on A10G
-- [ ] Monitor training loss, check for divergence
-- [ ] Generate sample outputs every 5,000 steps — listen for Kikuyu phoneme quality
-- [ ] Select best checkpoint based on validation loss
-- [ ] Quick listening test: 10 Kikuyu sentences, check intelligibility
-
-### 2.3 Phase 2 Training — Broadcast Voice Style
-- [ ] Fine-tune Phase 1 checkpoint on broadcast data
-  - LR: 5e-6 (lower to preserve Kikuyu knowledge), batch: 4, max steps: 10,000
-  - Estimated: 6–12 hours
-- [ ] Generate samples — check for broadcast voice style, pacing, emphasis
-- [ ] Test code-switched sentences (Kikuyu + English + Swahili)
-- [ ] Select best checkpoint
-- [ ] Save final model to S3
-
-### 2.4 Voice Cloning Setup
-- [ ] Select 2–3 target presenter voices from broadcast data
-- [ ] Extract 3+ second clean reference clips per presenter
-- [ ] Generate x-vector speaker embeddings
-- [ ] Test voice cloning: synthesize same text with different presenter embeddings
-- [ ] Store embeddings alongside model checkpoint
-
-### Milestone: ✅ Fine-tuned model producing intelligible Kikuyu speech with broadcast voice style
-
----
-
-## Phase 3 — Evaluation & Iteration (Weeks 9–10)
-
-### 3.1 Objective Evaluation
-- [ ] ASR roundtrip test: synthesize → Whisper transcribe → compute CER (target: ≤15%)
-- [ ] Speaker similarity: cosine similarity on embeddings (target: ≥0.85)
-- [ ] PESQ audio quality score (target: ≥3.0)
-- [ ] Test on held-out set:
-  - 200 general Kikuyu sentences
-  - 50 code-switched sentences
-  - 20 sentences with numbers/dates/currency
-  - 10 long-form news bulletin passages
-
-### 3.2 Subjective Evaluation
-- [ ] Recruit 5+ native Kikuyu speakers for evaluation panel
-- [ ] MOS test: rate naturalness 1–5 (target: ≥3.5)
-- [ ] Intelligibility test: can listeners understand the content?
-- [ ] Tone accuracy test: are Kikuyu tones correct?
-- [ ] Speaker similarity test: does cloned voice sound like the presenter?
-- [ ] A/B test against existing models (BrianMwangi/African-Kikuyu-TTS, gateremark/kikuyu-tts-v1)
-
-### 3.3 Iteration
-- [ ] Identify failure modes from evaluation (tone errors, code-switching breaks, etc.)
-- [ ] Augment training data to address weak areas
-- [ ] Re-train if needed (partial fine-tuning on problem areas)
-- [ ] Re-evaluate until targets met
-
-### Milestone: ✅ MOS ≥ 3.5, CER ≤ 15%, voice cloning working for 2+ presenters
-
----
-
-## Phase 4 — Packaging & Delivery (Week 10)
-
-### 4.1 Inference Package
-- [ ] Build CLI interface (`python -m wanjiku_tts --text "..." --output speech.wav`)
-- [ ] Build Python API (`WanjikuTTS` class with `synthesize()` method)
-- [ ] Support voice cloning mode (pass reference audio)
-- [ ] Support voice design mode (pass text description)
-- [ ] Add model quantization option (INT8) for smaller GPU deployment
-
-### 4.2 Documentation
-- [ ] Update README with final usage instructions
-- [ ] Document model card: training data, performance metrics, limitations
-- [ ] Document known limitations (which Kikuyu constructs work poorly, etc.)
-- [ ] Write deployment guide for AWS inference
-
-### 4.3 Delivery
-- [ ] Push final model checkpoint to S3 / HuggingFace (if public release)
-- [ ] Tag release v1.0 on GitHub
-- [ ] Demo: generate sample audio clips for stakeholder review
-- [ ] Handoff documentation
-
-### Milestone: ✅ v1.0 released, demo audio delivered
-
----
-
-## Task Summary
-
-| Phase | Tasks | Duration | Blockers |
-|-------|-------|----------|----------|
-| 1 — Data | 24 tasks | Weeks 1–4 | Native Kikuyu speaker for transcription review |
-| 2 — Training | 16 tasks | Weeks 5–8 | AWS GPU quota approval, Phase 1 data ready |
-| 3 — Evaluation | 12 tasks | Weeks 9–10 | Evaluation panel recruitment |
-| 4 — Delivery | 9 tasks | Week 10 | Evaluation targets met |
-| **Total** | **61 tasks** | **10 weeks** | |
-
----
-
-## Key Dependencies
-
-```
-Environment Setup ──▶ WAXAL Download ──▶ Data Processing ──▶ S3 Upload
-                                                                 │
-Radio Recording ──▶ Audio Cleaning ──▶ Transcription ──▶ S3 Upload
-                                                                 │
-                                              ┌──────────────────┘
-                                              ▼
-                                    GPU Instance Setup
-                                              │
-                                              ▼
-                                    Phase 1 Training (WAXAL)
-                                              │
-                                              ▼
-                                    Phase 2 Training (Broadcast)
-                                              │
-                                              ▼
-                                    Voice Cloning Setup
-                                              │
-                                              ▼
-                                    Evaluation ──▶ Iteration Loop
-                                              │
-                                              ▼
-                                    Packaging & Delivery
-```
-
----
-
-## Critical Path
-
-The longest sequential chain determines the minimum project duration:
-
-**Radio recording (2 weeks)** → **Transcription review (2 weeks)** → **Phase 1 training (1 week)** → **Phase 2 training (1 week)** → **Evaluation (1 week)** → **Delivery (1 week)** = **8 weeks minimum**
-
-The WAXAL download and processing can happen in parallel with radio recording. Transcription review is the most likely bottleneck — it requires a native Kikuyu speaker and is labor-intensive.
-
----
-
-## Cost Estimate (AWS)
-
-| Resource | Spec | Hours | $/hr | Total |
-|----------|------|-------|------|-------|
-| EC2 g5.2xlarge (A10G) | Phase 1 training | 24 | ~$1.21 | ~$29 |
-| EC2 g5.2xlarge (A10G) | Phase 2 training | 12 | ~$1.21 | ~$15 |
-| EC2 g5.2xlarge (A10G) | Iteration/eval | 20 | ~$1.21 | ~$24 |
-| EC2 g5.2xlarge (A10G) | Setup/debugging (spent) | ~3 | ~$1.21 | ~$4 |
-| S3 storage | ~5GB | 720 (month) | ~$0.023/GB | ~$0.12 |
-| Data transfer | uploads/downloads | — | — | ~$2 |
-| **Total estimate** | | | | **~$74** |
-
-Use spot instances to cut EC2 costs by ~60–70%. Budget ~$30–40 with spots.
-
-> For current pricing, check the [AWS Pricing Calculator](https://calculator.aws/).
-
----
-
-## Risk Register
-
-| # | Risk | Likelihood | Impact | Mitigation | Owner |
-|---|------|-----------|--------|------------|-------|
-| R1 | Kikuyu tones rendered incorrectly | High | High | Encode diacritics in training text; early native speaker eval at step 5k | ML lead |
-| R2 | Insufficient clean broadcast audio | Medium | High | Prioritize quality over quantity; 20h clean > 100h noisy | Data lead |
-| R3 | Qwen3-TTS won't adapt to Kikuyu | Low | Critical | Fallback to VITS or Meta MMS base model | ML lead |
-| R4 | Code-switching breaks synthesis | High | Medium | Explicit code-switched training examples; language tags | ML lead |
-| R5 | GPU spot instance interruption | Medium | Low | Checkpoint every 1000 steps to S3; auto-resume | Infra |
-| R6 | Transcription bottleneck delays project | High | Medium | Start recording early; use Whisper bootstrap to speed review | Data lead |
-| R7 | WAXAL dataset format incompatible | ~~Low~~ Resolved | ~~Medium~~ | ✅ Dataset downloaded, decoded, exported to WAV successfully |
+*Last updated: 2026-04-05*
