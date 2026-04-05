@@ -49,16 +49,12 @@ def main():
         MODEL_ID, dtype=torch.bfloat16, device_map={"": 0}
     )
 
-    # LoRA config — target language model attention layers (plain Linear, not ClippableLinear)
+    # LoRA config — target language model attention projections only
     lora_config = LoraConfig(
         r=16,
         lora_alpha=32,
-        target_modules=[
-            "language_model.*q_proj",
-            "language_model.*v_proj",
-            "language_model.*k_proj",
-            "language_model.*o_proj",
-        ],
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+        exclude_modules=["vision_tower.*", "audio_tower.*", "multi_modal_projector.*"],
         lora_dropout=0.05,
         task_type="CAUSAL_LM",
     )
