@@ -49,11 +49,11 @@ def main():
         MODEL_ID, dtype=torch.bfloat16, device_map="auto"
     )
 
-    # LoRA config — target attention layers
+    # LoRA config — target the inner linear layers inside ClippableLinear
     lora_config = LoraConfig(
         r=8,
         lora_alpha=16,
-        target_modules=["q_proj", "v_proj"],
+        target_modules=["q_proj.linear", "v_proj.linear"],
         lora_dropout=0.05,
         task_type="CAUSAL_LM",
     )
