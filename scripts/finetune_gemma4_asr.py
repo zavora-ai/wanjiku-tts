@@ -10,8 +10,8 @@ from pathlib import Path
 
 # ── Config ──────────────────────────────────────────────────────
 MODEL_NAME = "unsloth/gemma-4-E2B-it"
-MANIFEST_DIR = os.path.expanduser("~/wanjiku-tts/data/manifests/digigreen")
-OUTPUT_DIR = os.path.expanduser("~/wanjiku-tts/models/gemma4_kikuyu_asr")
+MANIFEST_DIR = os.path.expanduser("~/wanjiku-tts/data/manifests/combined")
+OUTPUT_DIR = os.path.expanduser("~/wanjiku-tts/models/gemma4_kikuyu_asr_v2")
 MAX_SEQ_LENGTH = 8192
 TARGET_SR = 16000
 INSTRUCTION = "Transcribe this Kikuyu speech accurately. Output only the transcription."
@@ -20,12 +20,12 @@ INSTRUCTION = "Transcribe this Kikuyu speech accurately. Output only the transcr
 BATCH_SIZE = 1
 GRAD_ACCUM = 4
 LR = 5e-5
-MAX_STEPS = 2000       # ~8000 effective samples with grad_accum=4
+MAX_STEPS = 12000      # ~1 epoch over 44K samples (44072 / 4 = 11018)
 WARMUP_RATIO = 0.03
-LORA_R = 16
-LORA_ALPHA = 32
-LOGGING_STEPS = 50
-SAVE_STEPS = 500
+LORA_R = 32
+LORA_ALPHA = 64
+LOGGING_STEPS = 100
+SAVE_STEPS = 2000
 
 # ── Load model ──────────────────────────────────────────────────
 print("Loading Gemma 4 E2B...")
