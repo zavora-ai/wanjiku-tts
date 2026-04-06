@@ -106,12 +106,15 @@ print("Converting to conversation format...")
 converted_dataset = [convert_to_conversation(item) for item in train_items]
 print(f"  Audio conversations: {len(converted_dataset)}")
 
-# Load text-only data and mix in
+# Load text-only data (denoising format) and mix in
 TEXT_MANIFEST = os.path.expanduser("~/wanjiku-tts/data/manifests/text_only/train.jsonl")
 if os.path.exists(TEXT_MANIFEST):
     text_items = load_manifest(TEXT_MANIFEST)
+    # Cap at ~20% of audio data to avoid alignment degradation (Fang et al. 2025)
+    max_text = int(len(converted_dataset) * 0.20)
+    text_items = text_items[:max_text]
     converted_dataset.extend(text_items)
-    print(f"  Text-only samples: {len(text_items)}")
+    print(f"  Text-only samples: {len(text_items)} (capped at 20% of audio)")
 
 import random
 random.seed(42)
