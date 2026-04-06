@@ -78,14 +78,14 @@ def load_audio(path, target_sr=TARGET_SR):
     return audio
 
 def convert_to_conversation(item):
-    """Convert manifest item to Gemma 4 chat format."""
-    audio_array = load_audio(item["audio_path"])
+    """Convert manifest item to Gemma 4 chat format.
+    Uses file path (not array) so audio loads lazily per batch."""
     return {
         "messages": [
             {
                 "role": "user",
                 "content": [
-                    {"type": "audio", "audio": audio_array},
+                    {"type": "audio", "audio": item["audio_path"]},
                     {"type": "text", "text": INSTRUCTION},
                 ],
             },
@@ -104,18 +104,8 @@ print(f"  Train samples: {len(train_items)}")
 # Convert to chat format (lazy — load audio on the fly during collation)
 # For large datasets, we convert in batches to avoid OOM
 print("Converting to conversation format...")
-converted_dataset = []
-errors = 0
-for i, item in enumerate(train_items):
-    if i % 2000 == 0 and i > 0:
-        print(f"  Converted {i}/{len(train_items)}...")
-    try:
-        converted_dataset.append(convert_to_conversation(item))
-    except Exception as e:
-        errors += 1
-        if errors <= 5:
-            print(f"  Error on {item['audio_path']}: {e}")
-print(f"  Converted: {len(converted_dataset)}, Errors: {errors}")
+converted_dataset = [convert_to_conversation(item) for item in train_items]
+print(f"  Converted: {len(converted_dataset)}")
 
 # ── Train ───────────────────────────────────────────────────────
 print("Setting up trainer...")
@@ -177,12 +167,11 @@ dev_path = os.path.join(MANIFEST_DIR, "dev.jsonl")
 if os.path.exists(dev_path):
     dev_items = load_manifest(dev_path)[:5]
     for item in dev_items:
-        audio_array = load_audio(item["audio_path"])
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "audio", "audio": audio_array},
+                    {"type": "audio", "audio": item["audio_path"]},
                     {"type": "text", "text": INSTRUCTION},
                 ],
             }
