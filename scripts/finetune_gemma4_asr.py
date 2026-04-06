@@ -20,7 +20,7 @@ INSTRUCTION = "Transcribe this Kikuyu speech accurately. Output only the transcr
 BATCH_SIZE = 1
 GRAD_ACCUM = 4
 LR = 5e-5
-MAX_STEPS = 12000      # ~1 epoch over 44K samples (44072 / 4 = 11018)
+MAX_STEPS = 14000      # ~1 epoch over 56K samples (44K audio + 12K text)
 WARMUP_RATIO = 0.03
 LORA_R = 32
 LORA_ALPHA = 64
@@ -99,13 +99,24 @@ def convert_to_conversation(item):
 print("Loading training data...")
 train_path = os.path.join(MANIFEST_DIR, "train.jsonl")
 train_items = load_manifest(train_path)
-print(f"  Train samples: {len(train_items)}")
+print(f"  Audio samples: {len(train_items)}")
 
-# Convert to chat format (lazy — load audio on the fly during collation)
-# For large datasets, we convert in batches to avoid OOM
+# Convert audio items to chat format (file paths — lazy loading)
 print("Converting to conversation format...")
 converted_dataset = [convert_to_conversation(item) for item in train_items]
-print(f"  Converted: {len(converted_dataset)}")
+print(f"  Audio conversations: {len(converted_dataset)}")
+
+# Load text-only data and mix in
+TEXT_MANIFEST = os.path.expanduser("~/wanjiku-tts/data/manifests/text_only/train.jsonl")
+if os.path.exists(TEXT_MANIFEST):
+    text_items = load_manifest(TEXT_MANIFEST)
+    converted_dataset.extend(text_items)
+    print(f"  Text-only samples: {len(text_items)}")
+
+import random
+random.seed(42)
+random.shuffle(converted_dataset)
+print(f"  Total training samples: {len(converted_dataset)}")
 
 # ── Train ───────────────────────────────────────────────────────
 print("Setting up trainer...")
